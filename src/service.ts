@@ -3,23 +3,28 @@ import {Endpoint, Limiter, Parameter} from './types';
 import config from './config';
 
 
-// Object that stores the endpoints as keys and the number of requests sent as a value
+/*
+* keys- urls
+* values- request count made for this url and request queue
+*/
 const limiter: Limiter = {};
 
+// Sent request if they wait in the queue or subtract one from the counter
 function subtractFromLimitCount(endpointUrl: string) {
     setTimeout(async () => {
         if (limiter[endpointUrl].queue.length) {
+            // Send new request from the queue
             const newRequest = limiter[endpointUrl].queue.shift();
             console.log('New request just sent from the queue!');
             await newRequest();
         } else {
             limiter[endpointUrl].count--;
         }
+        // Wait the amount of time the rate limiter restricts
     }, config.timeLimit);
 }
 
 async function request(endpoint: Endpoint, payload: Parameter): Promise<string> {
-
     // Using path parameters
     if (payload.pathParameters) {
         for (const pathParameter of Object.keys(payload.pathParameters)) {
@@ -33,7 +38,6 @@ async function request(endpoint: Endpoint, payload: Parameter): Promise<string> 
             url: endpoint.url,
             data: payload.bodyParameters
         });
-
         subtractFromLimitCount(endpoint.url);
 
         console.log('Request succeeded');
@@ -44,7 +48,7 @@ async function request(endpoint: Endpoint, payload: Parameter): Promise<string> 
     }
 }
 
-export async function requestWithRetry(endpoint: Endpoint, payload: Parameter): Promise<string> {
+async function requestWithRetry(endpoint: Endpoint, payload: Parameter): Promise<string> {
     let result = await request(endpoint, payload);
     if (result === 'fail') {
         return request(endpoint, payload);
@@ -56,15 +60,16 @@ export async function requestWithRetry(endpoint: Endpoint, payload: Parameter): 
 export async function batchRequests(endpoint: Endpoint, payloads: Parameter[]) {
     return new Promise<string[]>((resolve, reject) => {
         let count = payloads.length;
-
+        // Create key and initial value
         if (!limiter[endpoint.url]) {
             limiter[endpoint.url] = {count: 0, queue: []};
         }
 
         const results = new Array(payloads.length);
-
+        // Map to array of functions, invoking them send the request
         let payloadRequestsFunctions = payloads.map((payload, index) =>
             () => requestWithRetry(endpoint, payload).then(value => {
+                // After the promise returns update the value in the results array
                 results[index] = value;
                 count--;
                 if (!count) {
@@ -72,7 +77,7 @@ export async function batchRequests(endpoint: Endpoint, payloads: Parameter[]) {
                 }
             }));
 
-
+        // Add requests to queue if there are too many
         if (limiter[endpoint.url].count + payloads.length > config.requestsLimit) {
             const availbleRequestsNumber = config.requestsLimit - limiter[endpoint.url].count;
             const queuedRequestsNumber = payloads.length - availbleRequestsNumber;
@@ -83,6 +88,7 @@ export async function batchRequests(endpoint: Endpoint, payloads: Parameter[]) {
         console.log(`${payloadRequestsFunctions.length} requests on the way!`);
 
         limiter[endpoint.url].count += payloadRequestsFunctions.length;
+        // Send initial requests
         payloadRequestsFunctions.forEach(fn => fn());
     });
 }

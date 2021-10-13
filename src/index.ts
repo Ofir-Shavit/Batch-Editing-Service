@@ -11,7 +11,6 @@ app.use(morgan('dev'));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({extended: false}));
 
-
 app.post('/batch', async (req: Request<any, any, RequestBody, any>, res) => {
 
     let {endpoint, payloads} = req.body;
